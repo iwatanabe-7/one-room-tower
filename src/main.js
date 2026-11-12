@@ -1,6 +1,7 @@
 // ワンルームタワー Web 版（docs/prototype/web-prototype.html を Vite + モジュールに移したもの）
 import * as THREE from 'three';
 import './style.css';
+import { unlock, sfx, music, songForFloor, isMuted, setMuted, audioState } from './audio.js';
 import { BAL, GIMMICK_COST, GIMMICK_NAME } from './balance.js';
 import { LAYOUTS, REST, STD, ENTRANCE, EXIT_TRIGGER, DOOR, UPGRADES } from './data.js';
 import {
@@ -166,7 +167,7 @@ scene.add(heroModel);
 // ===== 状態 =====
 const S = { floor: 1, hp: 0, maxHp: 0, seed: 0, owned: [], runTime: 0, roomTime: 0, falls: 0, hits: 0, roomLog: [] };
 const P = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), grounded: false, ground: null,
-  groundPlat: null, sinceGround: 9, sinceJump: 9, airJumps: 0, stun: 0, inv: 0, squash: 0, yaw: 0 };
+  groundPlat: null, sinceGround: 9, sinceJump: 9, airJumps: 0, stun: 0, inv: 0, pushCd: 0, squash: 0, yaw: 0 };
 let rng = Math.random;
 let pick = () => 0;
 let rooms = [];
@@ -389,7 +390,8 @@ window.addEventListener('keydown', (e) => {
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   if (phase === 'choose' && /^Digit[1-3]$/.test(e.code)) { choose(+e.code.slice(5) - 1); return; }
   if ((phase === 'title' || phase === 'over' || phase === 'clear') && e.code === 'Enter') { start(); return; }
-  if (phase === 'play' && e.code === 'KeyR') { newRun(); return; }
+  if (e.code === 'KeyM') { toggleMute(); return; }
+  if (phase === 'play' && e.code === 'KeyR') { newRun(); music(songForFloor(1, false)); return; }
   if (!keys.has(e.code) && e.code === 'Space') jumpQueued = true;
   keys.add(e.code);
 });
@@ -423,6 +425,20 @@ if ('ontouchstart' in window || matchMedia('(pointer: coarse)').matches) documen
   $('jumpBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); jumpQueued = true; });
 }
 
+// 音のオン・オフ（M キー / 左上のボタン）。設定はブラウザに残る
+const muteBtn = $('mute');
+function toggleMute() {
+  unlock();
+  setMuted(!isMuted());
+  showMute();
+}
+function showMute() {
+  muteBtn.textContent = isMuted() ? '🔇 音なし' : '🔊 音あり';
+  muteBtn.setAttribute('aria-pressed', String(isMuted()));
+}
+muteBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleMute(); muteBtn.blur(); });
+showMute();
+
 // ===== ゲーム進行 =====
 function respawn() {
   const r = cur();
@@ -454,6 +470,7 @@ function damage(kind) {
     if (!debug.god) S.hp--;
   }
   P.inv = BAL.InvincibleSeconds;
+  sfx(kind === 'fall' ? 'fall' : 'damage');
   freeze = BAL.HitStopSeconds + 0.03;
   if (!reduceMotion) shake = 0.3;
   updateHud();
@@ -474,6 +491,9 @@ function onExit() {
   if (r.n >= BAL.TowerFloorCount) { finish(); return; }
   const next = spawnRoom(false);
   S.floor = next.n;
+  sfx('exit');
+  sfx('rise');
+  music(songForFloor(next.n, next.layout.rest));
   S.roomTime = 0;
   updateHud();
   if (next.layout.rest) openChoice();
@@ -592,8 +612,10 @@ function update(dt) {
   if (jumpQueued) P.sinceJump = 0; else P.sinceJump += dt;
   if (P.sinceJump <= BAL.JumpBufferTime && P.sinceGround <= BAL.CoyoteTime) {
     P.vel.y = jumpV; P.sinceJump = 9; P.sinceGround = 9;
+    sfx('jump');
   } else if (jumpQueued && P.sinceGround > BAL.CoyoteTime && P.airJumps > 0) {
     P.vel.y = jumpV * 0.92; P.airJumps--; P.sinceJump = 9; P.squash = -0.25;
+    sfx('airJump');
   }
   jumpQueued = false;
 
@@ -615,8 +637,10 @@ function update(dt) {
   P.pos.y += P.vel.y * dt; resolve('y', vy);
   if (P.ground) P.groundPlat = P.ground.plat;
   if (P.grounded && !wasGrounded && vy < -6) P.squash = 0.25;
+  if (P.grounded && !wasGrounded && vy < -BAL.LandSoundSpeed) sfx('land', Math.min(1, -vy / 12));
   if (P.groundPlat && P.groundPlat.crumble && P.groundPlat.state === 'idle') {
     P.groundPlat.state = 'shaking'; P.groundPlat.t = 0;
+    sfx('crumble');
   }
 
   // 回転バー
@@ -630,17 +654,22 @@ function update(dt) {
       const t = Math.max(-b.r, Math.min(b.r, rx * dx + rz * dz));
       const cx = rx - dx * t, cz = rz - dz * t;
       const dist = Math.hypot(cx, cz);
-      if (dist < BAL.BarHitRadius && P.inv <= 0) {
-        if (damage('hit') && phase === 'play') {
-          // 回転方向に弾き飛ばす
-          const sgn = Math.sign(b.speed) * Math.sign(t || 1);
-          const kx = cx / (dist || 1) + -dz * sgn * 0.8, kz = cz / (dist || 1) + dx * sgn * 0.8;
-          const kl = Math.hypot(kx, kz) || 1;
-          const k = BAL.BarKnockbackSpeed * S.mods.knock;
-          P.vel.set((kx / kl) * k, BAL.KnockbackUpSpeed * Math.max(0.5, S.mods.knock), (kz / kl) * k);
-          P.stun = BAL.StunSeconds;
-          showToast('<span class="d">回転バーに当たった！</span>');
-        }
+      // 回転バーはダメージなしで押し出すだけ（2026-11-13 ユーザー決定）。落ちたときだけ落下ダメージになる
+      // 落ちて入口に戻った直後（無敵時間中）は押されない
+      if (dist < BAL.BarHitRadius && P.pushCd <= 0 && P.inv <= 0) {
+        S.hits++;
+        S.roomStats.hits++;
+        P.pushCd = BAL.BarPushCooldown;
+        if (!reduceMotion) shake = BAL.BarPushShake;
+        // 回転方向に弾き飛ばす
+        const sgn = Math.sign(b.speed) * Math.sign(t || 1);
+        const kx = cx / (dist || 1) + -dz * sgn * 0.8, kz = cz / (dist || 1) + dx * sgn * 0.8;
+        const kl = Math.hypot(kx, kz) || 1;
+        const k = BAL.BarKnockbackSpeed * S.mods.knock;
+        P.vel.set((kx / kl) * k, BAL.KnockbackUpSpeed * Math.max(0.5, S.mods.knock), (kz / kl) * k);
+        P.stun = BAL.StunSeconds;
+        sfx('push');
+        showToast('<span class="d">回転バーに押された！</span>');
       }
     }
   }
@@ -655,6 +684,8 @@ function update(dt) {
       rm.key.got = true;
       rm.key.mesh.visible = false;
       rm.door.opened = true;
+      sfx('key');
+      sfx('door');
       showToast('<b>鍵を取った！</b> 出口の扉が開いた');
     }
   }
@@ -675,6 +706,7 @@ function update(dt) {
   }
 
   if (P.inv > 0) P.inv -= dt;
+  if (P.pushCd > 0) P.pushCd -= dt;
 }
 
 // ===== 見た目（カメラ・空・プレイヤーの動き） =====
@@ -832,7 +864,7 @@ function titleScreen() {
       <h1 id="t">ワンルームタワー</h1>
       <p>1部屋30秒。毎回ちがう仕掛けの部屋を抜けて、出口のゲートをくぐると次の部屋がせり上がってくる。HP ${BAL.PlayerMaxHp} で ${BAL.TowerFloorCount}F の最上階を目指す。</p>
       <div class="legend">
-        <div><span class="sw" style="background:#e5484d"></span>赤 = 危険（回転バー）</div>
+        <div><span class="sw" style="background:#e5484d"></span>赤 = 押し出す（回転バー）</div>
         <div><span class="sw" style="background:#d6b88f"></span>茶 = 乗ると崩れる床</div>
         <div><span class="sw" style="background:#f5c518"></span>黄 = 目標（出口・鍵）</div>
         <div><span class="sw" style="background:#eef1f7"></span>白 = 足場</div>
@@ -842,6 +874,7 @@ function titleScreen() {
         <span><kbd>Space</kbd></span><span>ジャンプ（端から少し遅れても跳べる）</span>
         <span><kbd>Shift</kbd></span><span>押している間ダッシュ</span>
         <span><kbd>R</kbd></span><span>最初からやり直す</span>
+        <span><kbd>M</kbd></span><span>音のオン・オフ</span>
       </div>
       <button class="btn" id="go" type="button">塔に入る <small>Enter</small></button>
       <p class="note">Unity 版（games/one-room-tower）の GDD と GameBalance の数値を使った、ブラウザ用の手触り確認版です。${BAL.RestFloorInterval}F ごとの休憩部屋で強化を1つ選べます。</p>
@@ -851,9 +884,11 @@ function titleScreen() {
 }
 
 function start(seed = 0) {
+  unlock();
   hide();
   newRun(seed);
   phase = 'play';
+  music(songForFloor(1, false));
 }
 
 let choices = [];
@@ -882,6 +917,8 @@ function choose(i) {
   hide();
   keys.clear();
   phase = 'play';
+  sfx('upgrade');
+  music(songForFloor(S.floor + 1, false));
   showToast(`<b>${u.name}</b> を手に入れた`);
 }
 
@@ -899,7 +936,7 @@ function results(kind) {
       <div class="stats">
         <div><span class="v">${S.floor}F</span><span class="l">到達フロア</span></div>
         <div><span class="v">${fmt(S.runTime)}</span><span class="l">タイム</span></div>
-        <div><span class="v">${S.falls} / ${S.hits}</span><span class="l">落下 / 被弾</span></div>
+        <div><span class="v">${S.falls} / ${S.hits}</span><span class="l">落下 / バー</span></div>
       </div>
       ${S.owned.length ? `<p class="note">強化: ${S.owned.join('・')}</p>` : ''}
       <button class="btn" id="again" type="button">もう一度登る <small>Enter</small></button>
@@ -907,8 +944,8 @@ function results(kind) {
   $('again').addEventListener('click', () => start());
   $('again').focus();
 }
-function gameOver() { logRoom(cur(), false); phase = 'over'; results('over'); }
-function finish() { phase = 'clear'; results('clear'); }
+function gameOver() { logRoom(cur(), false); phase = 'over'; music(null); sfx('over'); results('over'); }
+function finish() { phase = 'clear'; music(null); sfx('clear'); results('clear'); }
 
 // ===== ループ =====
 function resize() {
@@ -974,6 +1011,7 @@ window.__game = {
   },
   focus: () => null,
   renderer,
+  audio: audioState,
   // 撮影用: カメラを (x, y, z) に置いて (tx, ty, tz) を見る。null で追従に戻す
   closeUp: (v) => { closeUp = v; },
   render: () => renderer.render(scene, camera),

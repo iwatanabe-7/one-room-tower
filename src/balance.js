@@ -20,6 +20,11 @@ export const BAL = {
   HeroJumpStretch: 0.18,      // ジャンプした瞬間の縦伸び
   HeroAntennaSpring: 40,      // 触覚のばねの硬さ
   HeroAntennaDamping: 6,      // 触覚の揺れの減衰
+  // 音量（0〜1）
+  MasterVolume: 0.8,
+  SfxVolume: 0.7,
+  MusicVolume: 0.35,
+  LandSoundSpeed: 4,   // この速さ（m/s）以上で落ちて着地したら着地音
   // 部屋の規格
   RoomSize: 24,
   ExitFloorDepth: 3,
@@ -66,6 +71,8 @@ export const BAL = {
   BarArmHeight: 0.35,
   BarHitHalfHeight: 0.08,
   BarKnockbackSpeed: 5,
+  BarPushCooldown: 1.0,  // 押されたあと、次に押されるまでの間（秒）。続けて押され続けないように
+  BarPushShake: 0.15,    // 押されたときの画面の揺れ
   BarClearance: 0.3,
   BarWarnRingOpacity: 0.25,
   // 仕掛け: 動く足場

@@ -245,3 +245,17 @@ body.touch #hint { display: none; }
 
 /* hidden 属性を display: grid が上書きしないように（プロトタイプではプレイ中も暗幕が残っていた） */
 #overlay[hidden] { display: none; }
+
+/* 音のオン・オフ（HUD は pointer-events: none なので、このボタンだけ押せるようにする） */
+#mute {
+  pointer-events: auto;
+  align-self: flex-start;
+  font: 700 11px var(--body);
+  color: var(--paper);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+#mute:focus-visible { outline: 2px solid var(--paper); outline-offset: 2px; }
