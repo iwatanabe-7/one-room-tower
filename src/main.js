@@ -51,8 +51,12 @@ const MAT = {
   post: new THREE.MeshStandardMaterial({ color: 0x2a2d40, roughness: 0.6 }),
   goal: new THREE.MeshStandardMaterial({ color: 0xf5c518, roughness: 0.4, emissive: 0x6b5200, emissiveIntensity: 0.5 }),
   door: new THREE.MeshStandardMaterial({ color: 0xf5c518, roughness: 0.3, transparent: true, opacity: 0.55, emissive: 0x5a4500 }),
-  hero: new THREE.MeshStandardMaterial({ color: 0x3a5bff, roughness: 0.45 }),
-  heroDark: new THREE.MeshStandardMaterial({ color: 0x1b2a8a, roughness: 0.5 }),
+  hero: new THREE.MeshStandardMaterial({ color: 0x4a6cff, roughness: 0.5 }),
+  heroDark: new THREE.MeshStandardMaterial({ color: 0x2a3aa8, roughness: 0.55 }),
+  heroBelly: new THREE.MeshStandardMaterial({ color: 0xdfe6ff, roughness: 0.6 }),
+  eye: new THREE.MeshStandardMaterial({ color: 0x141624, roughness: 0.25 }),
+  shine: new THREE.MeshBasicMaterial({ color: 0xffffff }),
+  cheek: new THREE.MeshBasicMaterial({ color: 0xff8fa3, transparent: true, opacity: 0.7 }),
 };
 const SHARED_MATS = new Set(Object.values(MAT));
 const CRUMBLE_COLOR = 0xd6b88f;
@@ -80,17 +84,80 @@ function labelSprite(text, color = '#141624', bg = 'rgba(243,245,250,0.92)') {
 }
 
 // ===== プレイヤー =====
+// 二頭身のまるいキャラ。カメラは後ろから見るので、背中側（触覚・しっぽ）でも可愛く見えるようにする
+// 当たり判定（半径 R・高さ H）はそのまま。見た目は頭のてっぺんが約 1.5m
 const hero = new THREE.Group();
+const HERO = {};
 {
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.32, 1.0, 16), MAT.hero);
-  body.position.y = 0.6;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 18, 14), MAT.hero);
-  head.position.y = 1.32;
-  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.12, 0.1), MAT.heroDark);
-  visor.position.set(0, 1.36, 0.26);
-  const pack = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.42, 0.18), MAT.heroDark);
-  pack.position.set(0, 0.75, -0.3);
-  [body, head, visor, pack].forEach((m) => { m.castShadow = true; hero.add(m); });
+  const ball = (r, mat, sx = 1, sy = 1, sz = 1, seg = 20) => {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(r, seg, Math.round(seg * 0.75)), mat);
+    m.scale.set(sx, sy, sz);
+    m.castShadow = true;
+    return m;
+  };
+  // 体（ぽってりした豆形）とお腹
+  const body = ball(0.3, MAT.hero, 1, 1.05, 0.95);
+  body.position.y = 0.42;
+  // お腹は体の表面から少し前に出す（重なると縁がギザギザにちらつく）
+  const belly = ball(0.2, MAT.heroBelly, 1, 1.05, 0.55, 20);
+  belly.position.set(0, 0.4, 0.2);
+  belly.castShadow = false;
+  // 頭（大きめ）
+  const head = new THREE.Group();
+  head.position.y = 0.98;
+  head.add(ball(0.42, MAT.hero, 1, 0.92, 1, 28));
+  // 顔: 目（縦長の黒目＋白いハイライト）・ほっぺ・口
+  const eyes = [];
+  for (const sx of [-1, 1]) {
+    const eye = new THREE.Group();
+    eye.position.set(0.15 * sx, 0.04, 0.36);
+    eye.rotation.y = 0.32 * sx;
+    const pupil = ball(0.075, MAT.eye, 0.8, 1.15, 0.5, 14);
+    pupil.castShadow = false;
+    const shine = ball(0.026, MAT.shine, 1, 1, 0.5, 8);
+    shine.position.set(0.02, 0.035, 0.03);
+    shine.castShadow = false;
+    eye.add(pupil, shine);
+    head.add(eye);
+    eyes.push(eye);
+    const cheek = ball(0.06, MAT.cheek, 1.3, 0.75, 0.3, 10);
+    cheek.position.set(0.27 * sx, -0.09, 0.3);
+    cheek.rotation.y = 0.7 * sx;
+    cheek.castShadow = false;
+    head.add(cheek);
+  }
+  const mouth = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.012, 6, 12, Math.PI), MAT.eye);
+  mouth.position.set(0, -0.08, 0.4);
+  mouth.rotation.z = Math.PI;
+  head.add(mouth);
+  // 触覚（先に黄色い玉。ばねで揺れる）
+  const antenna = new THREE.Group();
+  antenna.position.set(0, 0.36, -0.04);
+  const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.024, 0.26, 8), MAT.heroDark);
+  stalk.position.y = 0.13;
+  const bulb = ball(0.07, MAT.goal, 1, 1, 1, 12);
+  bulb.position.y = 0.28;
+  antenna.add(stalk, bulb);
+  head.add(antenna);
+  // 背中: まるいリュックとしっぽ
+  const pack = ball(0.17, MAT.heroDark, 1, 1.1, 0.6, 14);
+  pack.position.set(0, 0.5, -0.27);
+  const tail = ball(0.08, MAT.heroBelly, 1, 1, 1, 10);
+  tail.position.set(0, 0.2, -0.29);
+  // 手足
+  const limb = (x, y, z, r, mat) => {
+    const pivot = new THREE.Group();
+    pivot.position.set(x, y, z);
+    const m = ball(r, mat, 1, 0.85, 1.2, 12);
+    m.position.y = -r * 0.6;
+    pivot.add(m);
+    hero.add(pivot);
+    return pivot;
+  };
+  const feet = [limb(-0.14, 0.12, 0.03, 0.11, MAT.heroDark), limb(0.14, 0.12, 0.03, 0.11, MAT.heroDark)];
+  const hands = [limb(-0.31, 0.5, 0, 0.08, MAT.hero), limb(0.31, 0.5, 0, 0.08, MAT.hero)];
+  hero.add(body, belly, head, pack, tail);
+  Object.assign(HERO, { head, eyes, antenna, feet, hands, walk: 0, idle: 0, blink: 0, ant: { a: 0, v: 0 }, lastVy: 0 });
 }
 const heroModel = new THREE.Group();
 heroModel.add(hero);
@@ -616,20 +683,69 @@ const LOOK_OFFSET = new THREE.Vector3(0, 1, 4);
 const camGoal = new THREE.Vector3();
 const lookAt = new THREE.Vector3();
 let skyFloor = -1;
-function animate(dt) {
+let closeUp = null;
+// キャラの動き: 歩くと弾んで手足を振る・止まるとこちらへ振り向く・まばたき・触覚が揺れる
+function animateHero(dt) {
   heroModel.position.copy(P.pos);
-  let dy = P.yaw - hero.rotation.y;
+  const hs = Math.hypot(P.vel.x, P.vel.z);
+  const moving = hs > 0.4 && P.grounded;
+  HERO.idle = hs > 0.4 || !P.grounded ? 0 : HERO.idle + dt;
+  // 止まってしばらくしたら、カメラ（-Z 側）の方へ振り向く
+  const yawGoal = HERO.idle > BAL.HeroIdleTurnSeconds && phase === 'play' ? Math.PI : P.yaw;
+  let dy = yawGoal - hero.rotation.y;
   dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-  hero.rotation.y += dy * Math.min(1, dt * 14);
+  hero.rotation.y += dy * Math.min(1, dt * (yawGoal === P.yaw ? 14 : 6));
+
+  // ジャンプした瞬間に縦に伸びる
+  if (P.vel.y > 1 && HERO.lastVy <= 1 && !P.grounded) P.squash = -BAL.HeroJumpStretch;
+  HERO.lastVy = P.vel.y;
   P.squash *= Math.pow(0.0001, dt);
+
+  // 歩き: 速さに合わせて弾み、手足を交互に振る
+  if (moving) HERO.walk += hs * BAL.HeroStepFrequency * dt;
+  const sw = moving ? Math.sin(HERO.walk) : 0;
+  const swing = sw * BAL.HeroLimbSwing * Math.min(1, hs / BAL.MoveSpeed);
+  const air = P.grounded ? 0 : 1;
+  HERO.feet[0].rotation.x = swing - air * 0.35;
+  HERO.feet[1].rotation.x = -swing + air * 0.25;
+  HERO.hands[0].rotation.x = -swing * 0.8;
+  HERO.hands[1].rotation.x = swing * 0.8;
+  HERO.hands[0].rotation.z = -air * 1.1;
+  HERO.hands[1].rotation.z = air * 1.1;
+  const bob = moving ? Math.abs(Math.sin(HERO.walk)) * BAL.HeroBobHeight : Math.sin(S.runTime * 2.4) * BAL.HeroBobHeight * 0.25;
+  hero.position.y = bob;
   hero.scale.set(1 + P.squash * 0.5, 1 - P.squash, 1 + P.squash * 0.5);
+
+  // まばたき（ハーネス中も毎回同じになるよう、ゲーム内の時間で決める）
+  HERO.blink += dt;
+  const bt = HERO.blink % BAL.HeroBlinkInterval;
+  const closed = bt < 0.12 || (HERO.blink % (BAL.HeroBlinkInterval * 3) > BAL.HeroBlinkInterval * 2 && bt > 0.2 && bt < 0.32);
+  for (const e of HERO.eyes) e.scale.y = closed ? 0.12 : 1;
+
+  // 触覚: 体の上下と前後の加速でばねのように揺れる
+  const a = HERO.ant;
+  const push = -P.vel.y * 0.02 + (moving ? Math.cos(HERO.walk * 2) * 0.15 : 0);
+  a.v += (-BAL.HeroAntennaSpring * a.a - BAL.HeroAntennaDamping * a.v) * dt + push * dt * 10;
+  a.a += a.v * dt;
+  a.a = Math.max(-0.6, Math.min(0.6, a.a));
+  HERO.antenna.rotation.x = a.a;
+
   hero.visible = !(P.inv > 0 && Math.floor(P.inv * 14) % 2 === 0);
+}
+
+function animate(dt) {
+  animateHero(dt);
 
   // カメラ（後方上空からジオラマを見下ろす）
-  camGoal.copy(P.pos).add(CAM_OFFSET);
-  camera.position.lerp(camGoal, 1 - Math.exp(-dt * 5));
-  lookAt.copy(P.pos).add(LOOK_OFFSET);
-  camera.lookAt(lookAt);
+  if (closeUp) {
+    camera.position.set(P.pos.x + closeUp[0], P.pos.y + closeUp[1], P.pos.z + closeUp[2]);
+    camera.lookAt(P.pos.x, P.pos.y + closeUp[3], P.pos.z);
+  } else {
+    camGoal.copy(P.pos).add(CAM_OFFSET);
+    camera.position.lerp(camGoal, 1 - Math.exp(-dt * 5));
+    lookAt.copy(P.pos).add(LOOK_OFFSET);
+    camera.lookAt(lookAt);
+  }
   if (shake > 0) {
     shake -= dt;
     // ハーネス中は画像が揺れないよう、揺れは乱数でなく時間で決める
@@ -858,6 +974,8 @@ window.__game = {
   },
   focus: () => null,
   renderer,
+  // 撮影用: カメラを (x, y, z) に置いて (tx, ty, tz) を見る。null で追従に戻す
+  closeUp: (v) => { closeUp = v; },
   render: () => renderer.render(scene, camera),
   start: (seed) => start(seed),
   startSelector: '#go',

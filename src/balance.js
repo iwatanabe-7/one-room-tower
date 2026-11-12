@@ -11,6 +11,15 @@ export const BAL = {
   JumpBufferTime: 0.1,
   MaxFallSpeed: 30,
   HitStopSeconds: 0.05,
+  // キャラの見た目の動き（手触り用。当たり判定には影響しない）
+  HeroStepFrequency: 2.2,     // 歩幅1歩あたりの周波数の係数（速さ m/s に掛ける）
+  HeroBobHeight: 0.06,        // 歩くときの上下の弾み（m）
+  HeroLimbSwing: 0.55,        // 手足の振り（rad）
+  HeroIdleTurnSeconds: 1.2,   // 止まってからカメラの方へ振り向くまで（秒）
+  HeroBlinkInterval: 2.8,     // まばたきの間隔（秒）
+  HeroJumpStretch: 0.18,      // ジャンプした瞬間の縦伸び
+  HeroAntennaSpring: 40,      // 触覚のばねの硬さ
+  HeroAntennaDamping: 6,      // 触覚の揺れの減衰
   // 部屋の規格
   RoomSize: 24,
   ExitFloorDepth: 3,
